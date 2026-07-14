@@ -30,7 +30,13 @@ interface EditRowProps {
   onCancel: () => void
 }
 
-function EditRow({ draft, onDraftChange, onConfirm, onCancel }: EditRowProps) {
+function EditRow({
+  draft,
+  duplicateCode,
+  onDraftChange,
+  onConfirm,
+  onCancel,
+}: EditRowProps & { duplicateCode?: boolean }) {
   return (
     <TableRow className="bg-accent/20">
       <TableCell className="py-1.5 text-center">
@@ -40,6 +46,11 @@ function EditRow({ draft, onDraftChange, onConfirm, onCancel }: EditRowProps) {
           onChange={(e) => onDraftChange({ ...draft, productCode: e.target.value.toUpperCase() })}
           placeholder="LOC-001"
         />
+        {duplicateCode && (
+          <p className="mt-1 text-left text-xs text-red-600">
+            Duplicate code detected
+          </p>
+        )}
       </TableCell>
       <TableCell className="py-1.5">
         <input
@@ -89,6 +100,7 @@ export function EditProductsContent({ onSaveRef }: EditProductsContentProps) {
   const [adding, setAdding] = React.useState(false)
   const [activeAddDraftKey, setActiveAddDraftKey] = React.useState<string | null>(null)
   const [pendingDraftKeys, setPendingDraftKeys] = React.useState<string[]>([])
+  const [saveError, setSaveError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     getProducts().then((items) => {
@@ -97,8 +109,53 @@ export function EditProductsContent({ onSaveRef }: EditProductsContentProps) {
     })
   }, [])
 
+  const allProductRows = React.useMemo(() => {
+    const rows: Product[] = []
+
+    for (const product of products) {
+      rows.push(drafts[product.productCode] ?? product)
+    }
+
+    for (const key of pendingDraftKeys) {
+      if (!products.some((product) => product.productCode === key)) {
+        const draft = drafts[key]
+        if (draft) {
+          rows.push(draft)
+        }
+      }
+    }
+
+    return rows
+  }, [products, drafts, pendingDraftKeys])
+
+  const duplicateProductCodes = React.useMemo(() => {
+    const counts = new Map<string, number>()
+
+    for (const product of allProductRows) {
+      const code = product.productCode.trim().toUpperCase()
+      if (!code) continue
+      counts.set(code, (counts.get(code) ?? 0) + 1)
+    }
+
+    return new Set(
+      Array.from(counts.entries())
+        .filter(([, count]) => count > 1)
+        .map(([code]) => code)
+    )
+  }, [allProductRows])
+
   const handleSaveAll = React.useCallback(async () => {
+    setSaveError(null)
     if (pendingDraftKeys.length === 0) return
+
+    if (duplicateProductCodes.size > 0) {
+      setSaveError(
+        `Duplicate location code${duplicateProductCodes.size > 1 ? "s" : ""}: ${
+          Array.from(duplicateProductCodes).join(", ")
+        }`
+      )
+      return
+    }
 
     const nextByCode = new Map<string, Product>()
 
@@ -147,7 +204,7 @@ export function EditProductsContent({ onSaveRef }: EditProductsContentProps) {
     setEditingCode(null)
     setActiveAddDraftKey(null)
     setPendingDraftKeys([])
-  }, [drafts, pendingDraftKeys, products])
+  }, [drafts, duplicateProductCodes, pendingDraftKeys, products])
 
   React.useEffect(() => {
     if (onSaveRef) {
@@ -181,6 +238,8 @@ export function EditProductsContent({ onSaveRef }: EditProductsContentProps) {
   }
 
   function confirmDraft() {
+    setSaveError(null)
+
     if (adding && activeAddDraftKey && drafts[activeAddDraftKey]) {
       const key = activeAddDraftKey
       setPendingDraftKeys((prev) => (prev.includes(key) ? prev : [...prev, key]))
@@ -221,6 +280,7 @@ export function EditProductsContent({ onSaveRef }: EditProductsContentProps) {
   }
 
   function updateDraft(code: string, product: Product) {
+    setSaveError(null)
     setDrafts((prev) => ({ ...prev, [code]: product }))
   }
 
@@ -249,6 +309,12 @@ export function EditProductsContent({ onSaveRef }: EditProductsContentProps) {
         </Button>
       </div>
 
+      {saveError && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {saveError}
+        </div>
+      )}
+
       <div className="rounded-xl border bg-card overflow-hidden text-xs">
         <Table className="text-xs">
           <TableHeader>
@@ -274,56 +340,61 @@ export function EditProductsContent({ onSaveRef }: EditProductsContentProps) {
             )}
             {pendingDraftKeys
               .filter((key) => !products.some((product) => product.productCode === key) && drafts[key])
-              .map((key) => (
-                <TableRow key={key} className="h-10 bg-emerald-50/60 dark:bg-emerald-950/20">
-                  <TableCell className="text-center py-1.5 text-muted-foreground font-mono">
-                    {drafts[key]?.productCode}
-                  </TableCell>
-                  <TableCell className="py-1.5 text-center">
-                    <span className="font-medium truncate max-w-[200px]">
-                      {drafts[key]?.productName}
-                    </span>
-                  </TableCell>
-                  <TableCell className="py-1.5 text-center text-muted-foreground">
-                    {drafts[key]?.image || "-"}
-                    <span className="ml-2 text-[10px] text-emerald-600 font-medium uppercase tracking-wide">
-                      Pending Save
-                    </span>
-                  </TableCell>
-                  <TableCell className="py-1.5">
-                    <div className="flex justify-center gap-1">
-                      <button
-                        onClick={() => {
-                          setAdding(true)
-                          setEditingCode(null)
-                          setActiveAddDraftKey(key)
-                        }}
-                        className="rounded p-1 hover:bg-muted text-muted-foreground hover:text-foreground"
-                      >
-                        <PencilIcon className="size-3.5" />
-                      </button>
-                      <ConfirmDeleteDialog
-                        trigger={
-                          <button
-                            className="rounded p-1 hover:bg-red-100 dark:hover:bg-red-900/40 text-muted-foreground hover:text-red-500"
-                          >
-                            <Trash2Icon className="size-3.5" />
-                          </button>
-                        }
-                        title="Remove pending location?"
-                        description="This pending location draft will be discarded."
-                        onConfirm={() => removeDraft(key)}
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+              .map((key) => {
+                const draft = drafts[key]
+                if (!draft) return null
+
+                return (
+                  <TableRow key={key} className="h-10 bg-emerald-50/60 dark:bg-emerald-950/20">
+                    <TableCell className="py-1.5 text-center text-muted-foreground font-mono">
+                      {draft.productCode}
+                    </TableCell>
+                    <TableCell className="py-1.5 text-center">
+                      <span className="max-w-[200px] truncate font-medium">
+                        {draft.productName}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-1.5 text-center text-muted-foreground">
+                      {draft.image || "-"}
+                      <span className="ml-2 text-[10px] font-medium uppercase tracking-wide text-emerald-600">
+                        Pending Save
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-1.5">
+                      <div className="flex justify-center gap-1">
+                        <button
+                          onClick={() => {
+                            setAdding(true)
+                            setEditingCode(null)
+                            setActiveAddDraftKey(key)
+                          }}
+                          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >
+                          <PencilIcon className="size-3.5" />
+                        </button>
+                        <ConfirmDeleteDialog
+                          trigger={
+                            <button className="rounded p-1 text-muted-foreground hover:bg-red-100 hover:text-red-500 dark:hover:bg-red-900/40">
+                              <Trash2Icon className="size-3.5" />
+                            </button>
+                          }
+                          title="Remove pending location?"
+                          description="This pending location draft will be discarded."
+                          onConfirm={() => removeDraft(key)}
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
             {products.map((item) => {
               if (editingCode === item.productCode && drafts[item.productCode]) {
+                const normalizedCode = drafts[item.productCode].productCode.trim().toUpperCase()
                 return (
                   <EditRow
                     key={item.productCode}
                     draft={drafts[item.productCode]}
+                    duplicateCode={duplicateProductCodes.has(normalizedCode)}
                     onDraftChange={(p) => updateDraft(item.productCode, p)}
                     onConfirm={confirmDraft}
                     onCancel={cancelEdit}

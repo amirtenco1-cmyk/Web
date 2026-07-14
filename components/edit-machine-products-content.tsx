@@ -37,7 +37,7 @@ const inputCls =
   "w-full rounded-md border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
 
 interface AssignmentEditRowProps {
-  products: Product[]
+  availableProducts: Product[]
   draft: AssignmentDraft
   onDraftChange: (draft: AssignmentDraft) => void
   onConfirm: () => void
@@ -45,7 +45,7 @@ interface AssignmentEditRowProps {
 }
 
 function AssignmentEditRow({
-  products,
+  availableProducts,
   draft,
   onDraftChange,
   onConfirm,
@@ -63,7 +63,7 @@ function AssignmentEditRow({
           onChange={(e) => onDraftChange({ ...draft, locationCode: e.target.value })}
         >
           <option value="">Select location</option>
-          {products.map((p) => (
+          {availableProducts.map((p) => (
             <option key={p.productCode} value={p.productCode}>
               {p.productCode} — {p.productName}
             </option>
@@ -137,6 +137,36 @@ export function EditMachineProductsContent({ onSaveRef }: EditMachineProductsCon
     () => new Map(products.map((p) => [p.productCode, p])),
     [products]
   )
+
+  const assignedLocationCodes = React.useMemo(() => {
+    const codes = new Set<string>()
+
+    assignments.forEach((assignment) => {
+      if (assignment.locationCode) {
+        codes.add(assignment.locationCode)
+      }
+    })
+
+    pendingDraftKeys.forEach((key) => {
+      const locationCode = drafts[key]?.locationCode?.trim().toUpperCase()
+      if (locationCode) {
+        codes.add(locationCode)
+      }
+    })
+
+    return codes
+  }, [assignments, drafts, pendingDraftKeys])
+
+  function getAvailableProducts(draft: AssignmentDraft) {
+    const currentLocationCode = draft.locationCode?.trim().toUpperCase()
+    const originalLocationCode = draft.originalLocationCode?.trim().toUpperCase()
+
+    return products.filter((product) => {
+      if (product.productCode === currentLocationCode) return true
+      if (product.productCode === originalLocationCode) return true
+      return !assignedLocationCodes.has(product.productCode)
+    })
+  }
 
   const handleSaveAll = React.useCallback(async () => {
     if (pendingDraftKeys.length === 0) return
@@ -327,7 +357,7 @@ export function EditMachineProductsContent({ onSaveRef }: EditMachineProductsCon
             <TableBody>
               {adding && activeAddDraftKey && drafts[activeAddDraftKey] && (
                 <AssignmentEditRow
-                  products={products}
+                  availableProducts={getAvailableProducts(drafts[activeAddDraftKey])}
                   draft={drafts[activeAddDraftKey]}
                   onDraftChange={(draft) => updateDraft(activeAddDraftKey, draft)}
                   onConfirm={confirmDraft}
@@ -390,7 +420,7 @@ export function EditMachineProductsContent({ onSaveRef }: EditMachineProductsCon
                   return (
                     <AssignmentEditRow
                       key={key}
-                      products={products}
+                      availableProducts={getAvailableProducts(drafts[key])}
                       draft={drafts[key]}
                       onDraftChange={(draft) => updateDraft(key, draft)}
                       onConfirm={confirmDraft}

@@ -27,6 +27,10 @@ async function ensureRouteLocationsTable() {
   await dbQuery(
     "CREATE INDEX IF NOT EXISTS idx_route_locations_route_id ON route_locations(route_id)"
   )
+
+  await dbQuery(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_route_locations_location_code_unique ON route_locations(location_code)"
+  )
 }
 
 export async function GET(request: NextRequest) {
@@ -78,13 +82,30 @@ export async function POST(request: NextRequest) {
     const rows: RouteLocationRow[] = []
 
     for (const item of payload as RouteLocationRow[]) {
-      const routeId = item.route_id?.trim()
+        const routeId = item.route_id?.trim()
       const locationCode = item.location_code?.trim().toUpperCase()
 
       if (!routeId || !locationCode) {
         return NextResponse.json(
           { error: "route_id and location_code are required" },
           { status: 400 }
+        )
+      }
+
+      const existing = await dbQuery<RouteLocationRow>(
+        `SELECT route_id FROM route_locations WHERE location_code = $1`,
+        [locationCode]
+      )
+
+      if (
+        existing.rows.length > 0 &&
+        existing.rows[0].route_id !== routeId
+      ) {
+        return NextResponse.json(
+          {
+            error: `Location ${locationCode} is already assigned to another route`,
+          },
+          { status: 409 }
         )
       }
 
@@ -102,6 +123,16 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(rows, { status: 201 })
   } catch (error) {
+    if (
+      error instanceof Error &&
+      /duplicate key value violates unique constraint/i.test(error.message)
+    ) {
+      return NextResponse.json(
+        { error: "Location is already assigned to another route" },
+        { status: 409 }
+      )
+    }
+
     const message =
       error instanceof Error ? error.message : "Failed to upsert route locations"
     return NextResponse.json({ error: message }, { status: 500 })
